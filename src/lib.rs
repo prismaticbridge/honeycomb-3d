@@ -5,7 +5,7 @@ use crate::{
     utils::{SurfaceError, try_create_surface},
     vertex::{InterpolatedPose, TRANSFORM_MATRIX_DESC, TextureVertex, Transform, Vertex},
 };
-use glam::{Mat4, Vec3};
+use glam::{Mat4, Quat, Vec3};
 use std::{num::NonZeroU64, sync::Arc, time::Instant};
 use std::{path::PathBuf, sync::Mutex};
 use wgpu::util::DeviceExt;
@@ -532,21 +532,21 @@ impl Renderer {
         );
     }
 
-    ///TODO figure out the camera in 3d
-    // pub fn set_transform(&mut self, scale: Vec3, angle: f32) {
-    //     let new_transform = Transform {
-    //         position: Vec3::from_array(self.camera_transform.translation),
-    //         rotation: angle,
-    //         scale,
-    //         shear: Vec2::ZERO,
-    //     };
-    //     self.camera
-    //         .update_target(&new_transform, self.frame_timestamp_us, 0);
-    // }
-
-    // pub fn camera_position(&self) -> Vec2 {
-    //     return -Vec2::from_array(self.camera_transform.translation); // camera position is secretly inverted
-    // }
+    pub fn update_camera_transform(&mut self, position: &Vec3, orientation: &Quat, duration: u64) {
+        self.view_pose.update_target(
+            &Transform {
+                position: *position,
+                rotation: *orientation,
+                scale: Vec3 {
+                    x: 1.0,
+                    y: 1.0,
+                    z: 1.0,
+                },
+            },
+            self.frame_timestamp_us,
+            duration,
+        );
+    }
 
     pub fn move_object(&mut self, material: usize, mesh: usize, object: usize, position: Vec3) {
         let material = &mut self.scenes[self.active_scene.unwrap()].materials[material];
