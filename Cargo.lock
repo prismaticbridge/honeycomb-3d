@@ -538,17 +538,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "252afb9ae5eaa683babdc6a068b3f5726eb19e05070c731f9b2a23a7c3e8ed34"
 
 [[package]]
-name = "engine"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "glam",
- "image",
- "wgpu",
- "winit",
-]
-
-[[package]]
 name = "equator"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -825,6 +814,17 @@ name = "hermit-abi"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e17592d60ebacc7d5e169f4663c5f84f9161cc90328abcfe8456f41e4dfcb284"
+
+[[package]]
+name = "honeycomb-3d"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "glam",
+ "image",
+ "wgpu",
+ "winit",
+]
 
 [[package]]
 name = "image"
