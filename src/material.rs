@@ -1,5 +1,5 @@
-use crate::{GPUTransform, vertex::{InterpolatedPose, Transform}};
-use glam::{Affine2, Vec2};
+use crate::vertex::{InterpolatedPose, Transform};
+use glam::{Mat4, Vec3};
 use image;
 use std::sync::Arc;
 
@@ -9,9 +9,9 @@ pub struct Mesh {
     pub vertex_offset: u32,
     pub index_offset: u32,
     pub num_indices: u32,
-    pub transformations: Vec<GPUTransform>, //each instance gets one transformation
+    pub transformations: Vec<Mat4>, //each instance gets one transformation
     pub interpolated_poses: Vec<InterpolatedPose>,
-    pub interpolated_transforms: Vec<GPUTransform>, //basically a temporary buffer
+    pub interpolated_transforms: Vec<Mat4>, //basically a temporary buffer
     pub direct_transform_buffer: GpuBuffer,
     pub interpolated_transform_buffer: GpuBuffer,
 }
@@ -123,10 +123,10 @@ impl Material {
         self.meshes.len() - 1
     }
 
-    pub fn add_instance(&mut self, transform: &glam::Affine2, mesh: usize) {
+    pub fn add_instance(&mut self, transform: glam::Mat4, mesh: usize) {
         let mesh = &mut self.meshes[mesh];
         let size = mesh.transformations.len();
-        mesh.transformations.push(GPUTransform::from(transform));
+        mesh.transformations.push(transform);
         mesh.direct_transform_buffer
             .append(bytemuck::cast_slice(&mesh.transformations[size..size + 1]));
     }
@@ -135,16 +135,20 @@ impl Material {
         let mesh = &mut self.meshes[mesh];
         let interpolated_pose = InterpolatedPose::new(transform.clone());
         mesh.interpolated_poses.push(interpolated_pose);
-        mesh.interpolated_transforms.push(GPUTransform::from(&Affine2::IDENTITY));
+        mesh.interpolated_transforms.push(Mat4::IDENTITY);
         let len = mesh.interpolated_transforms.len();
-        mesh.interpolated_transform_buffer.append(bytemuck::cast_slice(&mesh.interpolated_transforms[len-1..len]));
+        mesh.interpolated_transform_buffer
+            .append(bytemuck::cast_slice(
+                &mesh.interpolated_transforms[len - 1..len],
+            ));
     }
 
-    pub fn move_object_absolute(&mut self, mesh: usize, object: usize, position: Vec2) {
+    pub fn move_object_absolute(&mut self, mesh: usize, object: usize, position: Vec3) {
         let mesh = &mut self.meshes[mesh];
-        mesh.transformations[object].move_absolute(position);
+        let translation_matrix = Mat4::from_translation(position);
+        mesh.transformations[object] = translation_matrix * mesh.transformations[object];
         mesh.direct_transform_buffer.update_aligned(
-            (object * size_of::<GPUTransform>()) as u32,
+            (object * size_of::<Mat4>()) as u32,
             bytemuck::cast_slice(&[mesh.transformations[object]]),
         );
     }
@@ -158,7 +162,8 @@ impl Material {
                 let transform = mesh.interpolated_poses[i].interpolate(frame_timestamp);
                 mesh.interpolated_transforms[i] = transform;
             }
-            mesh.interpolated_transform_buffer.update_aligned(0, bytemuck::cast_slice(&mesh.interpolated_transforms));
+            mesh.interpolated_transform_buffer
+                .update_aligned(0, bytemuck::cast_slice(&mesh.interpolated_transforms));
         }
     }
 

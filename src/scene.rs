@@ -6,7 +6,7 @@ use wgpu::{
     util::{BufferInitDescriptor, DeviceExt},
 };
 
-use crate::{GPUTransform, GpuContext, buffer::GpuBuffer, material::ColoredObject, vertex::Vertex};
+use crate::{GpuContext, buffer::GpuBuffer, material::ColoredObject, vertex::Vertex};
 
 pub struct Scene {
     //for colored vertices only
@@ -41,7 +41,7 @@ impl Scene {
             static_ib: GpuBuffer::new(gpu.clone(), wgpu::BufferUsages::INDEX),
             static_transform_buffer: gpu.device.create_buffer_init(&BufferInitDescriptor {
                 label: None,
-                contents: bytemuck::cast_slice(&[GPUTransform::from(&glam::Affine2::IDENTITY)]),
+                contents: bytemuck::cast_slice(&[glam::Mat4::IDENTITY]),
                 usage: wgpu::BufferUsages::VERTEX,
             }),
             materials: Vec::new(),

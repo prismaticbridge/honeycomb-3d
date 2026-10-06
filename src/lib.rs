@@ -1,10 +1,11 @@
 use crate::{
+    constants::{FAR_DISTANCE, FOV_AREA, NEAR_DISTANCE},
     material::ColoredObject,
     scene::Scene,
     utils::{SurfaceError, try_create_surface},
-    vertex::{GPUTransform, InterpolatedPose, TextureVertex, Transform, Vertex},
+    vertex::{InterpolatedPose, TRANSFORM_MATRIX_DESC, TextureVertex, Transform, Vertex},
 };
-use glam::{Affine2, Vec2};
+use glam::{Mat4, Vec3};
 use std::{num::NonZeroU64, sync::Arc, time::Instant};
 use std::{path::PathBuf, sync::Mutex};
 use wgpu::util::DeviceExt;
@@ -14,6 +15,7 @@ use winit::{
 };
 
 mod buffer;
+pub mod constants;
 mod material;
 mod scene;
 pub mod utils;
@@ -37,16 +39,16 @@ pub struct Renderer {
     config: wgpu::SurfaceConfiguration,
     is_surface_configured: Mutex<bool>, // so render() doesn't require mutable reference and can be run asynchronously
 
-    pub window_width: u32,
-    pub window_height: u32,
-
     basic_render_pipeline: wgpu::RenderPipeline,
     texture_render_pipeline: wgpu::RenderPipeline,
 
     texture_bind_group_layout: wgpu::BindGroupLayout,
 
-    camera: InterpolatedPose,
-    camera_transform: GPUTransform,
+    view_pose: InterpolatedPose,
+    view_matrix: Mat4,
+    projection_matrix: Mat4,
+    //not really worth storing view_proj, since it changes basically every frame
+    // view_proj_matrix: Mat4,
     //uniform buffers currently only used for camera
     uniform_buffer: wgpu::Buffer,
     uniform_bind_group: wgpu::BindGroup,
@@ -210,13 +212,24 @@ impl Renderer {
                 ],
             });
 
-        let camera_pose_transform = Transform::new();
-        let camera = InterpolatedPose::new(camera_pose_transform);
-        let camera_transform = GPUTransform::from(&glam::Affine2::IDENTITY);
+        let view_pose_transform = Transform::new(); //scale is always (1, 1, 1)
+        let view_pose = InterpolatedPose::new(view_pose_transform);
+        let view_matrix = view_pose.interpolate(0); //returns identity
+
+        let aspect_ratio = window_width as f32 / window_height as f32;
+        let vfov = (FOV_AREA / aspect_ratio).sqrt();
+        let projection_matrix = glam::camera::rh::proj::directx::perspective(
+            vfov,
+            aspect_ratio,
+            NEAR_DISTANCE,
+            FAR_DISTANCE,
+        );
+
+        let view_proj_matrix = view_matrix * projection_matrix;
 
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("uniform buffer init descriptor"),
-            contents: bytemuck::cast_slice(&[camera_transform]),
+            contents: bytemuck::cast_slice(&[view_proj_matrix]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
@@ -228,7 +241,7 @@ impl Renderer {
                 resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                     buffer: &uniform_buffer,
                     offset: 0,
-                    size: NonZeroU64::new(size_of::<GPUTransform>() as u64),
+                    size: NonZeroU64::new(size_of::<Mat4>() as u64),
                 }),
             }],
         });
@@ -250,7 +263,7 @@ impl Renderer {
                 vertex: wgpu::VertexState {
                     module: &texture_shader,
                     entry_point: Some("vs_main"),
-                    buffers: &[Some(TextureVertex::desc()), Some(GPUTransform::desc())],
+                    buffers: &[Some(TextureVertex::desc()), Some(TRANSFORM_MATRIX_DESC)],
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                 },
                 fragment: Some(wgpu::FragmentState {
@@ -295,14 +308,13 @@ impl Renderer {
             gpu,
             config,
             is_surface_configured: Mutex::new(false),
-            window_width,
-            window_height,
             window,
             basic_render_pipeline,
             texture_bind_group_layout,
             texture_render_pipeline,
-            camera,
-            camera_transform,
+            view_matrix,
+            view_pose,
+            projection_matrix,
             uniform_buffer,
             uniform_bind_group,
             scenes: Vec::new(),
@@ -359,7 +371,7 @@ impl Renderer {
         scene: usize,
         material: usize,
         mesh: usize,
-        transform: &Affine2,
+        transform: Mat4,
     ) -> usize {
         let material_ref = &mut self.scenes[scene].materials[material];
         material_ref.add_instance(transform, mesh);
@@ -384,7 +396,7 @@ impl Renderer {
         material: usize,
         mesh: usize,
         object: usize,
-        new_target: Vec2,
+        new_target: Vec3,
         duration: u64,
     ) {
         let scene = match self.active_scene {
@@ -413,11 +425,12 @@ impl Renderer {
             material.update_interpolations(self.frame_timestamp_us);
         }
 
-        self.camera_transform = self.camera.interpolate(self.frame_timestamp_us);
+        self.view_matrix = self.view_pose.interpolate(self.frame_timestamp_us);
+        let view_proj_matrix = self.view_matrix * self.projection_matrix;
         self.gpu.queue.write_buffer(
             &self.uniform_buffer,
             0,
-            bytemuck::cast_slice(&[self.camera_transform]),
+            bytemuck::cast_slice(&[view_proj_matrix]),
         );
     }
 
@@ -508,35 +521,39 @@ impl Renderer {
         if let Ok(mut surface_configured) = self.is_surface_configured.lock() {
             *surface_configured = true;
         };
+
+        let aspect_ratio = width as f32 / height as f32;
+        let vfov = (FOV_AREA / aspect_ratio).sqrt();
+        self.projection_matrix = glam::camera::rh::proj::directx::perspective(
+            vfov,
+            aspect_ratio,
+            NEAR_DISTANCE,
+            FAR_DISTANCE,
+        );
     }
 
-    pub fn move_camera(&mut self, offset: Vec2) {
-        self.camera_transform.move_relative(-offset);
-    }
+    ///TODO figure out the camera in 3d
+    // pub fn set_transform(&mut self, scale: Vec3, angle: f32) {
+    //     let new_transform = Transform {
+    //         position: Vec3::from_array(self.camera_transform.translation),
+    //         rotation: angle,
+    //         scale,
+    //         shear: Vec2::ZERO,
+    //     };
+    //     self.camera
+    //         .update_target(&new_transform, self.frame_timestamp_us, 0);
+    // }
 
-    /// Sets the camera to an absolute world position
-    pub fn move_camera_absolute(&mut self, position: Vec2, move_time: u64) {
-        self.camera
-            .move_target_absolute(-position, self.frame_timestamp_us, move_time);
-    }
+    // pub fn camera_position(&self) -> Vec2 {
+    //     return -Vec2::from_array(self.camera_transform.translation); // camera position is secretly inverted
+    // }
 
-    pub fn set_transform(&mut self, scale: Vec2, angle: f32) {
-        let new_transform = Transform {
-            position: Vec2::from_array(self.camera_transform.translation),
-            rotation: angle,
-            scale,
-            shear: Vec2::ZERO,
-        };
-        self.camera
-            .update_target(&new_transform, self.frame_timestamp_us, 0);
-    }
-
-    pub fn camera_position(&self) -> Vec2 {
-        return -Vec2::from_array(self.camera_transform.translation); // camera position is secretly inverted
-    }
-
-    pub fn move_object(&mut self, material: usize, mesh: usize, object: usize, position: Vec2) {
+    pub fn move_object(&mut self, material: usize, mesh: usize, object: usize, position: Vec3) {
         let material = &mut self.scenes[self.active_scene.unwrap()].materials[material];
         material.move_object_absolute(mesh, object, position);
+    }
+
+    pub fn get_window_dimensions(&self) -> (u32, u32) {
+        return (self.config.width, self.config.height);
     }
 }
