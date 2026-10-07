@@ -149,7 +149,8 @@ impl Renderer {
             topology: wgpu::PrimitiveTopology::TriangleList,
             strip_index_format: None,
             front_face: wgpu::FrontFace::Ccw,
-            cull_mode: Some(wgpu::Face::Back),
+            cull_mode: Some(wgpu::Face::Front),
+            // cull_mode: None,
             polygon_mode: wgpu::PolygonMode::Fill,
             unclipped_depth: false,
             conservative: false,
@@ -426,7 +427,8 @@ impl Renderer {
         }
 
         self.view_matrix = self.view_pose.interpolate(self.frame_timestamp_us);
-        let view_proj_matrix = self.view_matrix * self.projection_matrix;
+        let view_proj_matrix = self.projection_matrix * self.view_matrix;
+        println!("matrix: {}", view_proj_matrix);
         self.gpu.queue.write_buffer(
             &self.uniform_buffer,
             0,
@@ -523,7 +525,7 @@ impl Renderer {
         };
 
         let aspect_ratio = width as f32 / height as f32;
-        let vfov = (FOV_AREA / aspect_ratio).sqrt();
+        let vfov = (FOV_AREA / aspect_ratio).sqrt().to_radians();
         self.projection_matrix = glam::camera::rh::proj::directx::perspective(
             vfov,
             aspect_ratio,
@@ -533,10 +535,17 @@ impl Renderer {
     }
 
     pub fn update_camera_transform(&mut self, position: &Vec3, orientation: &Quat, duration: u64) {
+        // position is camera position expressed in global frame
+        // transform it to camera frame by applying the inverse orientation of the camera
+        let rotate_world_to_camera = orientation.inverse();
+        let camera_position_local = rotate_world_to_camera * position;
+        // invert it to get transformation from global frame to camera frame
+        let position_transform_camera_frame = -camera_position_local;
+        // inverse orientation transform is already correct for rotating world coordinates to camera frame:
         self.view_pose.update_target(
             &Transform {
-                position: *position,
-                rotation: *orientation,
+                position: position_transform_camera_frame,
+                rotation: rotate_world_to_camera,
                 scale: Vec3 {
                     x: 1.0,
                     y: 1.0,

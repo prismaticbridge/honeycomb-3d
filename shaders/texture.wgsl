@@ -7,7 +7,10 @@ struct AffineTransform {
 struct VertexInput {
     @location(0) position: vec3<f32>,
     @location(1) uv_coords: vec2<f32>,
-    @location(2) model: mat4x4<f32>
+    @location(2) model_col0: vec4<f32>,
+    @location(3) model_col1: vec4<f32>,
+    @location(4) model_col2: vec4<f32>,
+    @location(5) model_col3: vec4<f32>
 };
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
@@ -19,8 +22,9 @@ var<uniform> camera: mat4x4<f32>;
 
 @vertex
 fn vs_main(model: VertexInput) -> VertexOutput {
+    let model_matrix = mat4x4<f32>(model.model_col0, model.model_col1, model.model_col2, model.model_col3);
     var out: VertexOutput;
-    let world_pos = model.model * vec4<f32>(model.position, 1.0);
+    let world_pos = model_matrix * vec4<f32>(model.position, 1.0);
     out.clip_position = camera * world_pos;
     out.uv = model.uv_coords;
     return out;

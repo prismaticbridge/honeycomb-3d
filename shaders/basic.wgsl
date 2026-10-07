@@ -4,7 +4,7 @@ struct VertexInput {
 };
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
-    @location(0) @interpolate(flat) color: vec3<f32>,
+    @location(0) color: vec3<f32>,
 };
 
 @group(0) @binding(0)
@@ -13,7 +13,7 @@ var<uniform> camera: mat4x4<f32>;
 @vertex
 fn vs_main(vertex: VertexInput) -> VertexOutput {
     var out: VertexOutput;
-    out.clip_pos = camera * vec4<f32>(vertex.position, 1.0)
+    out.clip_position = camera * vec4<f32>(vertex.position, 1.0);
     out.color = vec3<f32>(vertex.color);
     return out;
 }
