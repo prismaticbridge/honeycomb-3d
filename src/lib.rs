@@ -90,11 +90,16 @@ impl Renderer {
             .await
             .unwrap();
 
+        let supported_features = adapter.features();
+        if !supported_features.contains(*gpu_features) {
+            return Err(supported_features);
+        }
+
         //Device and queue creation
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: None,
-                required_features: wgpu::Features::empty(),
+                required_features: *gpu_features,
                 experimental_features: wgpu::ExperimentalFeatures::disabled(),
                 required_limits: wgpu::Limits::default(),
                 memory_hints: Default::default(),
@@ -102,11 +107,6 @@ impl Renderer {
             })
             .await
             .unwrap();
-
-        let supported_features = adapter.features();
-        if !supported_features.contains(*gpu_features) {
-            return Err(supported_features);
-        }
 
         let surface_caps = surface.get_capabilities(&adapter);
         let surface_format = surface_caps
