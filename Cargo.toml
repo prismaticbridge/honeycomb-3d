@@ -9,3 +9,6 @@ glam = { version = "0.34.*", features = ["bytemuck"] }
 image = "0.25.*"
 wgpu = "30.*"
 winit = { version = "0.30.*", features = ["wayland"] }
+
+[profile.release]
+lto = "thin"

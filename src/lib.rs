@@ -8,7 +8,7 @@ use crate::{
 use glam::{Mat4, Quat, Vec3};
 use std::{num::NonZeroU64, sync::Arc, time::Instant};
 use std::{path::PathBuf, sync::Mutex};
-use wgpu::util::DeviceExt;
+use wgpu::{Features, util::DeviceExt};
 use winit::{
     event_loop::{ActiveEventLoop, EventLoop},
     window::Window,
@@ -26,14 +26,15 @@ pub fn create_event_loop() -> EventLoop<()> {
 }
 
 pub struct GpuContext {
-    device: wgpu::Device,
-    queue: wgpu::Queue,
+    pub device: wgpu::Device,
+    pub queue: wgpu::Queue,
 }
 
 pub struct Renderer {
     ///Window isn't used in renderer, the application should hold a separate Arc clone
     pub window: Arc<Window>,
     gpu: Arc<GpuContext>,
+    pub enabled_features: wgpu::Features,
 
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
@@ -63,7 +64,10 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    pub async fn new(event_loop: &ActiveEventLoop) -> Self {
+    pub async fn new(
+        event_loop: &ActiveEventLoop,
+        gpu_features: &wgpu::Features,
+    ) -> Result<Self, Features> {
         //Window creation
         let window_attributes = Window::default_attributes();
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
@@ -76,14 +80,15 @@ impl Renderer {
         let window_height = size.height;
 
         let (instance, surface) = try_create_surface(window.clone());
-        let eventual_adapter = instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::default(),
-            compatible_surface: Some(&surface),
-            force_fallback_adapter: false,
-            apply_limit_buckets: false,
-        });
-
-        let adapter = eventual_adapter.await.unwrap();
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::default(),
+                compatible_surface: Some(&surface),
+                force_fallback_adapter: false,
+                apply_limit_buckets: false,
+            })
+            .await
+            .unwrap();
 
         //Device and queue creation
         let (device, queue) = adapter
@@ -98,6 +103,11 @@ impl Renderer {
             .await
             .unwrap();
 
+        let supported_features = adapter.features();
+        if !supported_features.contains(*gpu_features) {
+            return Err(supported_features);
+        }
+
         let surface_caps = surface.get_capabilities(&adapter);
         let surface_format = surface_caps
             .formats
@@ -106,7 +116,6 @@ impl Renderer {
             .copied()
             .unwrap_or(surface_caps.formats[0]);
 
-        println!("Chosen format: {:?}", surface_format);
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: surface_format,
@@ -304,9 +313,10 @@ impl Renderer {
             }
         };
 
-        Self {
+        Ok(Self {
             surface,
             gpu,
+            enabled_features: *gpu_features,
             config,
             is_surface_configured: Mutex::new(false),
             window,
@@ -323,7 +333,7 @@ impl Renderer {
             asset_root,
             timestamp_start: Instant::now(),
             frame_timestamp_us: 0,
-        }
+        })
     }
 
     pub fn create_scene(&mut self) -> usize {
@@ -564,5 +574,10 @@ impl Renderer {
 
     pub fn get_window_dimensions(&self) -> (u32, u32) {
         return (self.config.width, self.config.height);
+    }
+
+    //for adding custom shaders or compute pipelines
+    pub fn get_gpu_context(&self) -> Arc<GpuContext> {
+        return Arc::clone(&self.gpu);
     }
 }
