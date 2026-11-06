@@ -103,10 +103,10 @@ impl Material {
         })
     }
 
-    pub fn create_mesh(&mut self, mesh: &[TextureVertex], indices: &[u16]) -> usize {
+    pub fn create_mesh(&mut self, mesh: &[TextureVertex], indices: &[u32]) -> usize {
         let new_mesh = Mesh {
             vertex_offset: self.index_buffer.bytes_used as u32 / size_of::<TextureVertex>() as u32,
-            index_offset: self.vertex_buffer.bytes_used as u32 / size_of::<u16>() as u32,
+            index_offset: self.vertex_buffer.bytes_used as u32 / size_of::<u32>() as u32,
             num_indices: indices.len() as u32,
             transformations: Vec::new(),
             interpolated_poses: Vec::new(),
@@ -118,7 +118,7 @@ impl Material {
             ),
         };
         self.vertex_buffer.append(bytemuck::cast_slice(mesh));
-        self.index_buffer.append(indices);
+        self.index_buffer.append(bytemuck::cast_slice(indices));
         self.meshes.push(new_mesh);
         self.meshes.len() - 1
     }
@@ -172,7 +172,7 @@ impl Material {
         render_pass.set_vertex_buffer(0, self.vertex_buffer.buffer.slice(..));
         render_pass.set_index_buffer(
             self.index_buffer.buffer.slice(..),
-            wgpu::IndexFormat::Uint16,
+            wgpu::IndexFormat::Uint32,
         );
         for mesh in &self.meshes {
             render_pass.set_vertex_buffer(1, mesh.direct_transform_buffer.buffer.slice(..));

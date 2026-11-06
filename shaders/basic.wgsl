@@ -23,8 +23,5 @@ fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
 }
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    //no srgb conversion? maybe? who knows
-    let linear = srgb_to_linear(in.color);
-    return vec4(linear, 1.0);
-    // return vec4(in.color, 1.0);
+    return vec4(in.color, 1.0);
 }

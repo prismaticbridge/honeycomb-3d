@@ -83,9 +83,17 @@ impl Vertex {
         }
     }
     pub fn desc() -> wgpu::VertexBufferLayout<'static> {
-        pub const ATTRIBUTES: [wgpu::VertexAttribute; 2] = wgpu::vertex_attr_array![
-                0 => Float32x3,
-                1 => Float32x3,
+        pub const ATTRIBUTES: [wgpu::VertexAttribute; 2] = [
+            wgpu::VertexAttribute {
+                offset: 0,
+                format: wgpu::VertexFormat::Float32x3,
+                shader_location: 0,
+            },
+            wgpu::VertexAttribute {
+                offset: std::mem::offset_of!(Vertex, color) as wgpu::BufferAddress,
+                format: wgpu::VertexFormat::Float32x3,
+                shader_location: 1,
+            },
         ];
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,

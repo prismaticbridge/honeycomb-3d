@@ -21,6 +21,8 @@ mod scene;
 pub mod utils;
 pub mod vertex;
 
+const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+
 pub fn create_event_loop() -> EventLoop<()> {
     EventLoop::new().unwrap()
 }
@@ -54,6 +56,9 @@ pub struct Renderer {
     uniform_buffer: wgpu::Buffer,
     uniform_bind_group: wgpu::BindGroup,
 
+    depth_texture: wgpu::Texture,
+    depth_view: wgpu::TextureView,
+
     scenes: Vec<Scene>,
     active_scene: Option<usize>,
 
@@ -61,6 +66,32 @@ pub struct Renderer {
 
     timestamp_start: Instant,
     frame_timestamp_us: u64, // for interpolations between updates
+}
+
+// this is needed multiple times
+fn create_depth_texture(
+    width: u32,
+    height: u32,
+    device: &wgpu::Device,
+) -> (wgpu::Texture, wgpu::TextureView) {
+    let depth_size = wgpu::Extent3d {
+        width,
+        height,
+        depth_or_array_layers: 1,
+    };
+    let depth_desc = wgpu::TextureDescriptor {
+        label: Some("depth texture"),
+        size: depth_size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: DEPTH_FORMAT,
+        view_formats: &[DEPTH_FORMAT],
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+    };
+    let depth_texture = device.create_texture(&depth_desc);
+    let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
+    (depth_texture, depth_view)
 }
 
 impl Renderer {
@@ -82,7 +113,8 @@ impl Renderer {
         let (instance, surface) = try_create_surface(window.clone());
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::default(),
+                power_preference: wgpu::PowerPreference::from_env()
+                    .unwrap_or(wgpu::PowerPreference::LowPower),
                 compatible_surface: Some(&surface),
                 force_fallback_adapter: false,
                 apply_limit_buckets: false,
@@ -158,7 +190,7 @@ impl Renderer {
             topology: wgpu::PrimitiveTopology::TriangleList,
             strip_index_format: None,
             front_face: wgpu::FrontFace::Ccw,
-            cull_mode: Some(wgpu::Face::Front),
+            cull_mode: Some(wgpu::Face::Back),
             // cull_mode: None,
             polygon_mode: wgpu::PolygonMode::Fill,
             unclipped_depth: false,
@@ -168,6 +200,13 @@ impl Renderer {
             count: 1,
             mask: !0,
             alpha_to_coverage_enabled: false,
+        };
+        let depth_stencil = wgpu::DepthStencilState {
+            format: DEPTH_FORMAT,
+            depth_write_enabled: Some(true),
+            depth_compare: Some(wgpu::CompareFunction::Less),
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
         };
         let basic_render_pipeline =
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -190,7 +229,7 @@ impl Renderer {
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                 }),
                 primitive: primitive_state,
-                depth_stencil: None,
+                depth_stencil: Some(depth_stencil.clone()),
                 multisample: multisample_state,
                 multiview_mask: None,
                 cache: None,
@@ -256,6 +295,22 @@ impl Renderer {
             }],
         });
 
+        let (depth_texture, depth_view) =
+            create_depth_texture(window_width, window_height, &device);
+
+        // let depth_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        //     address_mode_u: wgpu::AddressMode::ClampToEdge,
+        //     address_mode_v: wgpu::AddressMode::ClampToEdge,
+        //     address_mode_w: wgpu::AddressMode::ClampToEdge,
+        //     mag_filter: wgpu::FilterMode::Linear,
+        //     min_filter: wgpu::FilterMode::Linear,
+        //     mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+        //     compare: Some(wgpu::CompareFunction::LessEqual),
+        //     lod_min_clamp: 0.0,
+        //     lod_max_clamp: 100.0,
+        //     ..Default::default()
+        // });
+
         let texture_render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("texture pipeline"),
@@ -287,7 +342,7 @@ impl Renderer {
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                 }),
                 primitive: primitive_state,
-                depth_stencil: None,
+                depth_stencil: Some(depth_stencil.clone()),
                 multisample: multisample_state,
                 multiview_mask: None,
                 cache: None,
@@ -328,6 +383,8 @@ impl Renderer {
             projection_matrix,
             uniform_buffer,
             uniform_bind_group,
+            depth_texture,
+            depth_view,
             scenes: Vec::new(),
             active_scene: None,
             asset_root,
@@ -350,7 +407,7 @@ impl Renderer {
         &mut self,
         scene: usize,
         vertices: &[Vertex],
-        indices: &[u16],
+        indices: &[u32],
     ) -> ColoredObject {
         let scene_obj = &mut self.scenes[scene];
         scene_obj.add_static_object(vertices, indices)
@@ -372,7 +429,7 @@ impl Renderer {
         scene: usize,
         material: usize,
         vertices: &[TextureVertex],
-        indices: &[u16],
+        indices: &[u32],
     ) -> usize {
         self.scenes[scene].materials[material].create_mesh(vertices, indices)
     }
@@ -438,7 +495,6 @@ impl Renderer {
 
         self.view_matrix = self.view_pose.interpolate(self.frame_timestamp_us);
         let view_proj_matrix = self.projection_matrix * self.view_matrix;
-        println!("matrix: {}", view_proj_matrix);
         self.gpu.queue.write_buffer(
             &self.uniform_buffer,
             0,
@@ -506,7 +562,14 @@ impl Renderer {
                         store: wgpu::StoreOp::Store,
                     },
                 })],
-                depth_stencil_attachment: None,
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
                 occlusion_query_set: None,
                 timestamp_writes: None,
                 multiview_mask: None,
@@ -542,6 +605,9 @@ impl Renderer {
             NEAR_DISTANCE,
             FAR_DISTANCE,
         );
+
+        (self.depth_texture, self.depth_view) =
+            create_depth_texture(width, height, &self.gpu.device);
     }
 
     pub fn update_camera_transform(&mut self, position: &Vec3, orientation: &Quat, duration: u64) {

@@ -11,7 +11,7 @@ use crate::{GpuContext, buffer::GpuBuffer, material::ColoredObject, vertex::Vert
 pub struct Scene {
     //for colored vertices only
     pub static_vertices: Vec<Vertex>,
-    pub indices: Vec<u16>,
+    pub indices: Vec<u32>,
     static_vb: GpuBuffer,
     static_ib: GpuBuffer,
     static_transform_buffer: wgpu::Buffer,
@@ -54,7 +54,7 @@ impl Scene {
     pub fn add_static_object(
         &mut self,
         new_vertices: &[Vertex],
-        new_indices: &[u16],
+        new_indices: &[u32],
     ) -> ColoredObject {
         let start_index = self.indices.len() as u32;
         self.static_vertices.extend_from_slice(new_vertices);
@@ -84,8 +84,8 @@ impl Scene {
     pub fn render_static(&self, render_pass: &mut wgpu::RenderPass) {
         render_pass.set_vertex_buffer(0, self.static_vb.buffer.slice(..));
         render_pass.set_vertex_buffer(1, self.static_transform_buffer.slice(..));
-        render_pass.set_index_buffer(self.static_ib.buffer.slice(..), wgpu::IndexFormat::Uint16);
-        render_pass.draw_indexed(0..(self.static_ib.bytes_used / 2) as u32, 0, 0..1);
+        render_pass.set_index_buffer(self.static_ib.buffer.slice(..), wgpu::IndexFormat::Uint32);
+        render_pass.draw_indexed(0..(self.static_ib.bytes_used / 4) as u32, 0, 0..1);
     }
     pub fn render_materials(&self, render_pass: &mut wgpu::RenderPass) {
         for material in &self.materials {
