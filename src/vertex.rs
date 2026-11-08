@@ -1,13 +1,14 @@
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Quat, Vec3};
+use wgpu::{VertexAttribute, vertex_attr_array};
 
 // This is confusing. Even though in the shader it only uses slot 2,
 // it actually uses 4 consecutive slots to pass the indiviual columns of the matrix
 const ATTRIBUTES: [wgpu::VertexAttribute; 4] = wgpu::vertex_attr_array![
-    2 => Float32x4,
     3 => Float32x4,
     4 => Float32x4,
     5 => Float32x4,
+    6 => Float32x4,
 ];
 pub const TRANSFORM_MATRIX_DESC: wgpu::VertexBufferLayout = wgpu::VertexBufferLayout {
     array_stride: std::mem::size_of::<glam::Mat4>() as u64,
@@ -73,27 +74,22 @@ impl InterpolatedPose {
 pub struct Vertex {
     pub position: [f32; 3],
     pub color: [f32; 3],
+    pub normal: [f32; 3],
 }
 
 impl Vertex {
-    pub fn from_vector(position: &Vec3, color: [f32; 3]) -> Self {
+    pub fn from_vector(position: &Vec3, color: [f32; 3], normal: &Vec3) -> Self {
         Self {
             position: position.to_array(),
             color,
+            normal: normal.to_array(),
         }
     }
     pub fn desc() -> wgpu::VertexBufferLayout<'static> {
-        pub const ATTRIBUTES: [wgpu::VertexAttribute; 2] = [
-            wgpu::VertexAttribute {
-                offset: 0,
-                format: wgpu::VertexFormat::Float32x3,
-                shader_location: 0,
-            },
-            wgpu::VertexAttribute {
-                offset: std::mem::offset_of!(Vertex, color) as wgpu::BufferAddress,
-                format: wgpu::VertexFormat::Float32x3,
-                shader_location: 1,
-            },
+        pub const ATTRIBUTES: [VertexAttribute; 3] = vertex_attr_array![
+            0 => Float32x3,
+            1 => Float32x3,
+            2 => Float32x3,
         ];
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
@@ -108,12 +104,14 @@ impl Vertex {
 pub struct TextureVertex {
     pub position: [f32; 3],
     pub tex_coords: [f32; 2],
+    pub normal: [f32; 3],
 }
 impl TextureVertex {
     pub fn desc() -> wgpu::VertexBufferLayout<'static> {
-        pub const ATTRIBUTES: [wgpu::VertexAttribute; 2] = wgpu::vertex_attr_array![
+        pub const ATTRIBUTES: [wgpu::VertexAttribute; 3] = wgpu::vertex_attr_array![
                 0 => Float32x3,
                 1 => Float32x2,
+                2 => Float32x3,
         ];
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<TextureVertex>() as wgpu::BufferAddress,

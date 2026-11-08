@@ -1,4 +1,5 @@
 use crate::{
+    buffer::GpuBuffer,
     constants::{FAR_DISTANCE, FOV_AREA, NEAR_DISTANCE},
     material::ColoredObject,
     scene::Scene,
@@ -14,7 +15,7 @@ use winit::{
     window::Window,
 };
 
-mod buffer;
+pub mod buffer;
 pub mod constants;
 mod material;
 mod scene;
@@ -55,6 +56,12 @@ pub struct Renderer {
     //uniform buffers currently only used for camera
     uniform_buffer: wgpu::Buffer,
     uniform_bind_group: wgpu::BindGroup,
+    additional_buffers: Arc<Mutex<Vec<GpuBuffer>>>,
+    additional_buffer_slots: Vec<u32>,
+    additional_bg_layouts_static: Vec<wgpu::BindGroupLayout>,
+    additional_bg_layouts_texture: Vec<wgpu::BindGroupLayout>,
+    additional_bg_static: Vec<wgpu::BindGroup>,
+    additional_bg_texture: Vec<wgpu::BindGroup>,
 
     depth_texture: wgpu::Texture,
     depth_view: wgpu::TextureView,
@@ -66,6 +73,11 @@ pub struct Renderer {
 
     timestamp_start: Instant,
     frame_timestamp_us: u64, // for interpolations between updates
+}
+
+pub struct ShaderConfig<'a> {
+    pub shader_path: PathBuf,
+    pub additional_bind_group_layouts: &'a [wgpu::BindGroupLayoutDescriptor<'a>],
 }
 
 // this is needed multiple times
@@ -95,9 +107,11 @@ fn create_depth_texture(
 }
 
 impl Renderer {
-    pub async fn new(
+    pub async fn new<'a>(
         event_loop: &ActiveEventLoop,
         gpu_features: &wgpu::Features,
+        static_shader_config: Option<&ShaderConfig<'a>>,
+        texture_shader_config: Option<&ShaderConfig<'a>>,
     ) -> Result<Self, Features> {
         //Window creation
         let window_attributes = Window::default_attributes();
@@ -176,15 +190,38 @@ impl Renderer {
             });
 
         //Basic shader initialization
-        let basic_shader =
-            device.create_shader_module(wgpu::include_wgsl!("../shaders/basic.wgsl"));
+        let basic_shader = device.create_shader_module(match static_shader_config {
+            None => wgpu::include_wgsl!("../shaders/basic.wgsl"),
+            Some(config) => {
+                let shader_src = std::fs::read_to_string(&config.shader_path)
+                    .expect(&format!("Failed to read {}", config.shader_path.display()));
+                println!("{}", shader_src);
+                wgpu::ShaderModuleDescriptor {
+                    label: None,
+                    source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Owned(shader_src)),
+                }
+            }
+        });
+
+        let mut layouts_static: Vec<wgpu::BindGroupLayout> =
+            Vec::from([uniform_bind_group_layout.clone()]);
+        if let Some(config) = static_shader_config {
+            layouts_static.extend(
+                config
+                    .additional_bind_group_layouts
+                    .iter()
+                    .map(|desc| device.create_bind_group_layout(desc)),
+            )
+        }
+        let bind_group_layouts: Vec<Option<&wgpu::BindGroupLayout>> =
+            layouts_static.iter().map(|layout| Some(layout)).collect();
+
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Basic render pipeline layout"),
-                bind_group_layouts: &[Some(&uniform_bind_group_layout)],
+                bind_group_layouts: &bind_group_layouts,
                 immediate_size: 0,
             });
-
         //Shared states between render pipelines
         let primitive_state = wgpu::PrimitiveState {
             topology: wgpu::PrimitiveTopology::TriangleList,
@@ -235,8 +272,6 @@ impl Renderer {
                 cache: None,
             });
 
-        let texture_shader =
-            device.create_shader_module(wgpu::include_wgsl!("../shaders/texture.wgsl"));
         let texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("texture bind group layout"),
@@ -260,6 +295,29 @@ impl Renderer {
                     },
                 ],
             });
+        let texture_shader = device.create_shader_module(match texture_shader_config {
+            None => wgpu::include_wgsl!("../shaders/texture.wgsl"),
+            Some(config) => {
+                let shader_src = std::fs::read_to_string(&config.shader_path)
+                    .expect(&format!("Failed to read {}", config.shader_path.display()));
+                wgpu::ShaderModuleDescriptor {
+                    label: None,
+                    source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Owned(shader_src)),
+                }
+            }
+        });
+        let mut layouts_texture: Vec<wgpu::BindGroupLayout> = Vec::from([
+            uniform_bind_group_layout.clone(),
+            texture_bind_group_layout.clone(),
+        ]);
+        if let Some(config) = texture_shader_config {
+            layouts_texture.extend(
+                config
+                    .additional_bind_group_layouts
+                    .iter()
+                    .map(|desc| device.create_bind_group_layout(desc)),
+            )
+        }
 
         let view_pose_transform = Transform::new(); //scale is always (1, 1, 1)
         let view_pose = InterpolatedPose::new(view_pose_transform);
@@ -311,13 +369,13 @@ impl Renderer {
         //     ..Default::default()
         // });
 
+        let bind_group_layouts: Vec<Option<&wgpu::BindGroupLayout>> =
+            layouts_texture.iter().map(|layout| Some(layout)).collect();
+
         let texture_render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("texture pipeline"),
-                bind_group_layouts: &[
-                    Some(&uniform_bind_group_layout),
-                    Some(&texture_bind_group_layout),
-                ],
+                bind_group_layouts: &bind_group_layouts,
                 immediate_size: 0,
             });
 
@@ -383,6 +441,12 @@ impl Renderer {
             projection_matrix,
             uniform_buffer,
             uniform_bind_group,
+            additional_buffers: Arc::new(Mutex::new(Vec::new())),
+            additional_buffer_slots: Vec::new(),
+            additional_bg_layouts_static: layouts_static,
+            additional_bg_layouts_texture: layouts_texture,
+            additional_bg_static: Vec::new(),
+            additional_bg_texture: Vec::new(),
             depth_texture,
             depth_view,
             scenes: Vec::new(),
@@ -391,6 +455,41 @@ impl Renderer {
             timestamp_start: Instant::now(),
             frame_timestamp_us: 0,
         })
+    }
+
+    pub fn add_mapped_buffer(&mut self, buffer: GpuBuffer, slot: u32) {
+        if let Ok(mut buffers) = self.additional_buffers.lock() {
+            buffers.push(buffer);
+            self.additional_buffer_slots.push(slot);
+        }
+    }
+
+    pub fn get_mapped_buffers(&self) -> Arc<Mutex<Vec<GpuBuffer>>> {
+        return Arc::clone(&self.additional_buffers);
+    }
+
+    pub fn add_static_bind_group(&mut self, entries: &[wgpu::BindGroupEntry], layout_index: usize) {
+        let desc = wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &self.additional_bg_layouts_static[layout_index],
+            entries,
+        };
+        self.additional_bg_static
+            .push(self.gpu.device.create_bind_group(&desc));
+    }
+
+    pub fn add_texture_bind_group(
+        &mut self,
+        entries: &[wgpu::BindGroupEntry],
+        layout_index: usize,
+    ) {
+        let desc = wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &self.additional_bg_layouts_texture[layout_index],
+            entries,
+        };
+        self.additional_bg_texture
+            .push(self.gpu.device.create_bind_group(&desc));
     }
 
     pub fn create_scene(&mut self) -> usize {
@@ -575,11 +674,25 @@ impl Renderer {
                 multiview_mask: None,
             });
 
+            if let Ok(buffers) = self.additional_buffers.lock() {
+                for i in 0..buffers.len() {
+                    render_pass.set_vertex_buffer(
+                        self.additional_buffer_slots[i],
+                        buffers[i].buffer.slice(..),
+                    );
+                }
+            }
             render_pass.set_pipeline(&self.basic_render_pipeline);
             render_pass.set_bind_group(0, &self.uniform_bind_group, &[]); // need to be set once per render pass
+            for i in 0..self.additional_bg_static.len() {
+                render_pass.set_bind_group(i as u32 + 1, Some(&self.additional_bg_static[i]), &[]);
+            }
             scene.render_static(&mut render_pass);
 
             render_pass.set_pipeline(&self.texture_render_pipeline);
+            for i in 0..self.additional_bg_texture.len() {
+                render_pass.set_bind_group(i as u32 + 1, Some(&self.additional_bg_texture[i]), &[]);
+            }
             scene.render_materials(&mut render_pass);
         }
 
