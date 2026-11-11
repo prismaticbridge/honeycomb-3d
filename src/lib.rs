@@ -195,7 +195,6 @@ impl Renderer {
             Some(config) => {
                 let shader_src = std::fs::read_to_string(&config.shader_path)
                     .expect(&format!("Failed to read {}", config.shader_path.display()));
-                println!("{}", shader_src);
                 wgpu::ShaderModuleDescriptor {
                     label: None,
                     source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Owned(shader_src)),
@@ -519,7 +518,6 @@ impl Renderer {
         texture_image_path: T,
     ) -> usize {
         let path = self.asset_root.join(texture_image_path);
-        println!("{}", path.display());
         self.scenes[scene].add_material(&path.to_string_lossy(), &self.texture_bind_group_layout)
     }
 
