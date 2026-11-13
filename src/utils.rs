@@ -8,6 +8,18 @@ pub enum SurfaceError {
     Validation,
 }
 
+impl std::fmt::Display for SurfaceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Timeout => write!(f, "Timeout"),
+            Self::Lost => write!(f, "Lost"),
+            Self::Occluded => write!(f, "Occluded"),
+            Self::Outdated => write!(f, "Outdated"),
+            Self::Validation => write!(f, "Validation"),
+        }
+    }
+}
+
 //Safe(r) surface creation
 pub fn try_create_surface(
     window: Arc<winit::window::Window>,

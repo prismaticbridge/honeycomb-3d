@@ -73,12 +73,12 @@ impl InterpolatedPose {
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 pub struct Vertex {
     pub position: [f32; 3],
-    pub color: [f32; 3],
     pub normal: [f32; 3],
+    pub color: [f32; 4],
 }
 
 impl Vertex {
-    pub fn from_vector(position: &Vec3, color: [f32; 3], normal: &Vec3) -> Self {
+    pub fn from_vector(position: &Vec3, color: [f32; 4], normal: &Vec3) -> Self {
         Self {
             position: position.to_array(),
             color,
@@ -89,7 +89,7 @@ impl Vertex {
         pub const ATTRIBUTES: [VertexAttribute; 3] = vertex_attr_array![
             0 => Float32x3,
             1 => Float32x3,
-            2 => Float32x3,
+            2 => Float32x4,
         ];
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,

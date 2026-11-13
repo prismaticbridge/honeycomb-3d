@@ -17,6 +17,7 @@ pub struct Mesh {
 }
 
 pub struct ColoredObject {
+    pub object_index: u32,
     pub start_index: u32,
     pub num_indices: u32,
 }
